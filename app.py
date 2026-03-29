@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 from dotenv import load_dotenv
-from summarizer import process_paper, analyze_summary, chat_with_paper, generate_knowledge_graph
+from summarizer import process_paper, analyze_summary, chat_with_paper, generate_knowledge_graph, extract_important_sentences
 import markdown
 from xhtml2pdf import pisa
 from io import BytesIO
@@ -220,6 +220,19 @@ if st.session_state.summary:
             use_container_width=True
         )
 
+    # --- A*-Inspired Important Sentences ---
+    st.markdown("---")
+    st.markdown("### 📌 Important Sentences (A*-inspired)")
+    
+    if st.session_state.full_text:
+        important = extract_important_sentences(st.session_state.full_text, top_n=6)
+        if important:
+            with st.container(border=True):
+                for sentence in important:
+                    st.markdown(f"- {sentence}")
+        else:
+            st.info("Could not extract important sentences from this document.")
+    
     st.markdown("---")
     st.markdown("### Dive Deeper")
     

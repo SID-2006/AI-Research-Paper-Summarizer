@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import pdfplumber
 from google import genai
@@ -137,3 +138,98 @@ Paper Text:
         raw_text = raw_text[:-3]
         
     return raw_text.strip()
+
+
+def extract_important_sentences(full_text: str, top_n: int = 6) -> list[str]:
+    """
+    A*-inspired heuristic sentence extraction (runs locally, no API calls).
+    
+    Scores each sentence using:
+        f(n) = g(n) + h(n)
+    where:
+        g(n) = position-based score (earlier sentences get a slight boost)
+        h(n) = importance score (keyword presence + optimal length bonus)
+    
+    Returns the top_n highest-scoring sentences.
+    """
+    
+    # --- Important academic keywords grouped by relevance ---
+    KEYWORDS = [
+        "propose", "proposed", "method", "approach", "technique",
+        "result", "results", "finding", "findings",
+        "conclusion", "conclusions", "demonstrate", "demonstrated",
+        "significant", "significantly", "improve", "improvement",
+        "novel", "framework", "model", "algorithm",
+        "performance", "accuracy", "evaluate", "evaluation",
+        "contribute", "contribution", "objective", "hypothesis",
+        "experiment", "experimental", "analysis", "achieve", "achieved",
+        "outperform", "state-of-the-art", "benchmark"
+    ]
+    
+    # --- Step 1: Split text into sentences ---
+    # Use regex to split on sentence-ending punctuation followed by whitespace
+    raw_sentences = re.split(r'(?<=[.!?])\s+', full_text.strip())
+    
+    # --- Step 2: Clean and filter sentences ---
+    sentences = []
+    for s in raw_sentences:
+        cleaned = s.strip().replace("\n", " ")
+        # Remove multiple spaces
+        cleaned = re.sub(r'\s+', ' ', cleaned)
+        # Keep only sentences with a reasonable length (10-300 words)
+        word_count = len(cleaned.split())
+        if 10 <= word_count <= 300:
+            sentences.append(cleaned)
+    
+    if not sentences:
+        return []
+    
+    total = len(sentences)
+    scored_sentences = []
+    
+    for i, sentence in enumerate(sentences):
+        words = sentence.lower().split()
+        word_count = len(words)
+        
+        # --- g(n): Position-based score ---
+        # Earlier sentences (intro, abstract) and late sentences (conclusion)
+        # get a higher positional score. Middle sentences get less.
+        position_ratio = i / total  # 0.0 = very start, 1.0 = very end
+        if position_ratio < 0.15:
+            g_score = 3.0  # Abstract / Introduction
+        elif position_ratio > 0.85:
+            g_score = 2.5  # Conclusion
+        elif position_ratio < 0.3:
+            g_score = 1.5  # Early body
+        else:
+            g_score = 1.0  # Middle body
+        
+        # --- h(n): Importance heuristic ---
+        
+        # Keyword match count (each keyword found adds to the score)
+        keyword_hits = sum(1 for kw in KEYWORDS if kw in words)
+        keyword_score = min(keyword_hits * 1.5, 8.0)  # Cap at 8.0
+        
+        # Length bonus: prefer moderate-length sentences (20-60 words)
+        if 20 <= word_count <= 60:
+            length_score = 2.0
+        elif 15 <= word_count <= 80:
+            length_score = 1.0
+        else:
+            length_score = 0.5
+        
+        h_score = keyword_score + length_score
+        
+        # --- f(n) = g(n) + h(n) ---
+        f_score = g_score + h_score
+        
+        scored_sentences.append((f_score, i, sentence))
+    
+    # --- Step 3: Rank by f(n) descending and pick top_n ---
+    scored_sentences.sort(key=lambda x: x[0], reverse=True)
+    
+    # Select top_n, then re-sort by original position for reading order
+    top_sentences = scored_sentences[:top_n]
+    top_sentences.sort(key=lambda x: x[1])  # Sort by original index
+    
+    return [s[2] for s in top_sentences]
